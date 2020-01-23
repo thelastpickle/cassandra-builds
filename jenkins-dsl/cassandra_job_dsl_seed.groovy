@@ -242,6 +242,7 @@ job('Cassandra-template-dtest') {
 matrixJob('Cassandra-template-cqlsh-tests') {
     disabled(true)
     description(jobDescription)
+    label(slaveLabel)
     logRotator {
         numToKeep(25)
         artifactNumToKeep(1)
@@ -579,6 +580,7 @@ job('Cassandra-devbranch-dtest') {
  */
 matrixJob('Cassandra-devbranch-cqlsh-tests') {
     description(jobDescription)
+    label(slaveLabel)
     concurrentBuild()
     logRotator {
         numToKeep(25)
