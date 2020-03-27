@@ -373,7 +373,7 @@ cassandraBranches.each {
         }
     }
 
-     job("${jobNamePrefix}-test-jvm-dtest-forking") {
+     job("${jobNamePrefix}-jvm-dtest") {
         disabled(false)
         using('Cassandra-template-test')
         configure { node ->
