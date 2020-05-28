@@ -1,10 +1,19 @@
 #!/bin/bash -x
+# Expected to be run from inside cassandra-builds/docker/centos7-image.docker
 set -e
 
 if [ "$#" -ne 1 ]; then
    echo "$0 <branch>"
    exit 1
 fi
+
+[ "${BUILD_HOME}" == "${HOME}" ] || { echo >&2 "BUILD_HOME needs to be defined to the user's HOME"; exit 1; }
+[ "x${RPM_BUILD_DIR}" != "x" ] || { echo >&2 "RPM_BUILD_DIR needs to be defined"; exit 1; }
+[ -d "${RPM_BUILD_DIR}/SOURCES" ] || { echo >&2 "Directory ${RPM_BUILD_DIR}/SOURCES must exist"; exit 1; }
+[ "x${RPM_DIST_DIR}" != "x" ] || { echo >&2 "RPM_DIST_DIR needs to be defined"; exit 1; }
+[ -d "${RPM_DIST_DIR}" ] || { echo >&2 "Directory ${RPM_DIST_DIR} must exist"; exit 1; }
+[ "x${CASSANDRA_DIR}" != "x" ] || { echo >&2 "CASSANDRA_DIR needs to be defined"; exit 1; }
+[ -d "${CASSANDRA_DIR}" ] || { echo >&2 "Directory ${CASSANDRA_DIR} must exist"; exit 1; }
 
 CASSANDRA_BRANCH=$1
 
