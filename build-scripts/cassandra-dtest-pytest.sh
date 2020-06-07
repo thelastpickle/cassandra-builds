@@ -80,6 +80,9 @@ else
     exit 1
 fi
 
+# tar up ccm logs for easy retrieval
+tar -cJf ccm_logs.tar.xz /home/cassandra/cassandra/cassandra-dtest/tmp/*/test/*/logs/*
+
 ################################
 #
 # Clean
