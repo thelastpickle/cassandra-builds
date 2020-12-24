@@ -250,6 +250,11 @@ matrixJob('Cassandra-template-test') {
                 publishTestStabilityData()
             }
         }
+        jacocoCodeCoverage {
+            changeBuildStatus(false)
+            execPattern("**/**.exec")
+            sourcePattern("src/**/*.java,tools/**/*.java")
+        }
         publishOverSsh {
             server('Nightlies') {
                 transferSet {
