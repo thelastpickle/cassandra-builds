@@ -64,8 +64,8 @@ _main() {
   ant clean jar
 
   case $target in
-    "stress-test" | "fqltool-test")
-      ant $target -Dtmp.dir="$(pwd)/tmp" || echo "failed $target"
+    "stress-test" | "fqltool-test" | "microbench")
+      ant $target -Dtmp.dir="$(pwd)/tmp" -Dmaven.test.failure.ignore=true
       ;;
     "test")
       ant testclasslist -Dtest.classlistfile=<( _list_tests "unit" ) -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
