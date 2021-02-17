@@ -35,6 +35,7 @@ RUN yum -y install python2-pip
 RUN yum -y install redhat-rpm-config python2-devel gcc libffi-devel openssl-devel
 #RUN pip install --no-binary  'cryptography<3.4'
 
+RUN pip install 'setuptools<45'
 # install ssl enabled urllib for retrieving python packages
 # this will produce some ssl related warnings, which will be resolved once the package has been installed
 RUN pip install 'idna<3' 'cryptography<3.4' urllib3[secure]
