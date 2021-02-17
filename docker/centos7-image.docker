@@ -1,4 +1,4 @@
-FROM centos:7.0.1406
+FROM centos:7.9.2009
 
 ENV BUILD_HOME=/home/build
 ENV RPM_BUILD_DIR=$BUILD_HOME/rpmbuild
@@ -30,6 +30,10 @@ RUN yum -y update curl --disablerepo=epel
 
 # via epel-releases
 RUN yum -y install python2-pip
+
+# arm64 needs the following for python's cryptography
+RUN yum -y install redhat-rpm-config python2-devel gcc libffi-devel openssl-devel
+#RUN pip install --no-binary  'cryptography<3.4'
 
 # install ssl enabled urllib for retrieving python packages
 # this will produce some ssl related warnings, which will be resolved once the package has been installed
