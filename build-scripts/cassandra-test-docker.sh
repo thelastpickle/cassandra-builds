@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # A wrapper script to cassandra-test.sh
-#  that runs it in docker, collecting results.
+#  that split the test list into multiple docker runs, collecting results.
 #
 # The docker image used is normally based from those found in docker/testing/
 #
@@ -22,8 +22,8 @@ if [ "$#" -lt 3 ]; then
     fi
     java -version
     javac -version
-    echo "running: git clone --depth 1 --single-branch --branch=$BRANCH https://github.com/$REPO/cassandra.git"
-    git clone --depth 1 --single-branch --branch=$BRANCH https://github.com/$REPO/cassandra.git
+    echo "running: git clone --quiet --depth 1 --single-branch --branch=$BRANCH https://github.com/$REPO/cassandra.git"
+    until git clone --quiet --depth 1 --single-branch --branch=$BRANCH https://github.com/$REPO/cassandra.git ; do echo "git clone failed… trying again… " ; done
     cd cassandra
     echo "cassandra-test.sh (${1} ${2}) cassandra: `git log -1 --pretty=format:'%h %an %ad %s'`" | tee "${1}-$(echo $2 | sed 's/\//-/')-cassandra.head"
     echo "cassandra-test.sh (${1} ${2}) cassandra-builds: `git -C ../cassandra-builds log -1 --pretty=format:'%h %an %ad %s'`" | tee -a "${1}-$(echo $2 | sed 's/\//-/')-cassandra.head"
@@ -38,8 +38,8 @@ else
     BUILDSREPO=$3
     BUILDSBRANCH=$4
     DOCKER_IMAGE=$5
-    TARGET=$6
-    SPLIT_CHUNK=$7
+    TARGET=${6:-"test"}
+    SPLIT_CHUNK=${7:-"1/1"}
 
     # Setup JDK
     java_version=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}' | awk -F. '{print $1}')
@@ -59,21 +59,64 @@ BRANCH=$2
 JAVA_VERSION=${java_version}
 EOF
 
+    # A Jenkins agent is expected to have 8 cores and 16gb ram, for tests we can split that into three
+    INNER_SPLITS=$(( $(echo $SPLIT_CHUNK | cut -d"/" -f2 ) * 3 ))
+    INNER_SPLIT_THIRD=$(( $(echo $SPLIT_CHUNK | cut -d"/" -f1 ) * 3 ))
+    INNER_SPLIT_SECOND=$(( $INNER_SPLIT_THIRD - 1 ))
+    INNER_SPLIT_FIRST=$(( $INNER_SPLIT_THIRD - 2 ))
+
     # docker login to avoid rate-limiting apache images. credentials are expected to already be in place
     docker login || true
 
-    echo "cassandra-test-docker.sh: running: git clone --single-branch --depth 1 --branch $BUILDSBRANCH $BUILDSREPO; sh ./cassandra-builds/build-scripts/cassandra-test-docker.sh $TARGET $SPLIT_CHUNK"
-    ID=$(docker run -m 15g --memory-swap 15g --env-file env.list -dt $DOCKER_IMAGE dumb-init bash -ilc "git clone --single-branch --depth 1 --branch $BUILDSBRANCH $BUILDSREPO; sh ./cassandra-builds/build-scripts/cassandra-test-docker.sh $TARGET $SPLIT_CHUNK")
+    echo "cassandra-test-docker.sh: running: git clone --quiet --single-branch --depth 1 --branch $BUILDSBRANCH $BUILDSREPO; sh ./cassandra-builds/build-scripts/cassandra-test-docker.sh $TARGET ${INNER_SPLIT_FIRST}/${INNER_SPLITS}"
+    ID_1=$(docker run -m 5g --memory-swap 5g --env-file env.list -dt $DOCKER_IMAGE dumb-init bash -ilc "until git clone --quiet --single-branch --depth 1 --branch $BUILDSBRANCH $BUILDSREPO ; do echo 'git clone failed… trying again… ' ; done ; sh ./cassandra-builds/build-scripts/cassandra-test-docker.sh ${TARGET} ${INNER_SPLIT_FIRST}/${INNER_SPLITS}")
+    echo "cassandra-test-docker.sh: running: git clone --quiet --single-branch --depth 1 --branch $BUILDSBRANCH $BUILDSREPO; sh ./cassandra-builds/build-scripts/cassandra-test-docker.sh $TARGET ${INNER_SPLIT_SECOND}/${INNER_SPLITS}"
+    ID_2=$(docker run -m 5g --memory-swap 5g --env-file env.list -dt $DOCKER_IMAGE dumb-init bash -ilc "until git clone --quiet --single-branch --depth 1 --branch $BUILDSBRANCH $BUILDSREPO ; do echo 'git clone failed… trying again… ' ; done ; sh ./cassandra-builds/build-scripts/cassandra-test-docker.sh ${TARGET} ${INNER_SPLIT_SECOND}/${INNER_SPLITS}")
+    echo "cassandra-test-docker.sh: running: git clone --quiet --single-branch --depth 1 --branch $BUILDSBRANCH $BUILDSREPO; sh ./cassandra-builds/build-scripts/cassandra-test-docker.sh $TARGET ${INNER_SPLIT_THIRD}/${INNER_SPLITS}"
+    ID_3=$(docker run -m 5g --memory-swap 5g --env-file env.list -dt $DOCKER_IMAGE dumb-init bash -ilc "until git clone --quiet --single-branch --depth 1 --branch $BUILDSBRANCH $BUILDSREPO ; do echo 'git clone failed… trying again… ' ; done ; sh ./cassandra-builds/build-scripts/cassandra-test-docker.sh ${TARGET} ${INNER_SPLIT_THIRD}/${INNER_SPLITS}")
 
     # use docker attach instead of docker wait to get output
-    docker attach --no-stdin $ID
-    status="$?"
+    mkdir -p build/test/logs
+    docker attach --no-stdin $ID_1 > build/test/logs/docker_attach_1.log &
+    process_id_1=$!
+    docker attach --no-stdin $ID_2  > build/test/logs/docker_attach_2.log &
+    process_id_2=$!
+    docker attach --no-stdin $ID_3  > build/test/logs/docker_attach_3.log &
+    process_id_3=$!
+    wait $process_id_1
+    status_1="$?"
+    wait $process_id_2
+    status_2="$?"
+    wait $process_id_3
+    status_3="$?"
 
-    if [ "$status" -ne 0 ] ; then
-        echo "$ID failed (${status}), debug…"
-        docker inspect $ID
+    if [ "$status_1" -ne 0 ] ; then
+        echo "$ID_1 failed (${status}), debug…"
+        docker inspect $ID_1
         echo "–––"
-        docker logs $ID
+        docker logs $ID_1
+        echo "–––"
+        docker ps -a
+        echo "–––"
+        docker info
+        echo "–––"
+        dmesg
+    elif [ "$status_2" -ne 0 ] ; then
+        echo "$ID_2 failed (${status}), debug…"
+        docker inspect $ID_2
+        echo "–––"
+        docker logs $ID_2
+        echo "–––"
+        docker ps -a
+        echo "–––"
+        docker info
+        echo "–––"
+        dmesg
+    elif [ "$status_3" -ne 0 ] ; then
+        echo "$ID_3 failed (${status}), debug…"
+        docker inspect $ID_3
+        echo "–––"
+        docker logs $ID_3
         echo "–––"
         docker ps -a
         echo "–––"
@@ -81,15 +124,22 @@ EOF
         echo "–––"
         dmesg
     else
-        echo "$ID done (${status}), copying files"
-        # test meta
-        docker cp "$ID:/home/cassandra/cassandra/${TARGET}-$(echo $SPLIT_CHUNK | sed 's/\//-/')-cassandra.head" .
-        # test results
-        mkdir -p build/test
-        docker cp $ID:/home/cassandra/cassandra/build/test/output/. build/test/output
-        # test logs
-        docker cp $ID:/home/cassandra/cassandra/build/test/logs/. build/test/logs
+        echo "$ID_1 done (${status_1}), copying files"
+        docker cp "$ID_1:/home/cassandra/cassandra/$TARGET-${INNER_SPLIT_FIRST}-${INNER_SPLITS}-cassandra.head" .
+        docker cp $ID_1:/home/cassandra/cassandra/build/test/output/. build/test/output
+        docker cp $ID_1:/home/cassandra/cassandra/build/test/logs/. build/test/logs
+        echo "$ID_2 done (${status_2}), copying files"
+        docker cp "$ID_2:/home/cassandra/cassandra/$TARGET-${INNER_SPLIT_SECOND}-${INNER_SPLITS}-cassandra.head" .
+        docker cp $ID_2:/home/cassandra/cassandra/build/test/output/. build/test/output
+        docker cp $ID_2:/home/cassandra/cassandra/build/test/logs/. build/test/logs
+        echo "$ID_3 done (${status_2}), copying files"
+        docker cp "$ID_3:/home/cassandra/cassandra/$TARGET-${INNER_SPLIT_THIRD}-${INNER_SPLITS}-cassandra.head" .
+        docker cp $ID_3:/home/cassandra/cassandra/build/test/output/. build/test/output
+        docker cp $ID_3:/home/cassandra/cassandra/build/test/logs/. build/test/logs
+        xz build/test/logs/docker_attach_*.log
     fi
 
-    docker rm $ID
+    docker rm ${ID_1}
+    docker rm ${ID_2}
+    docker rm ${ID_3}
 fi

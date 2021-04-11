@@ -26,7 +26,7 @@ _timeout_for() {
 
 _build_all_dtest_jars() {
     cd $TMP_DIR
-    git clone --depth 1 --no-single-branch https://gitbox.apache.org/repos/asf/cassandra.git cassandra-dtest-jars
+    until git clone --quiet --depth 1 --no-single-branch https://gitbox.apache.org/repos/asf/cassandra.git cassandra-dtest-jars ; do echo "git clone failed… trying again… " ; done
     cd cassandra-dtest-jars
     for branch in cassandra-2.2 cassandra-3.0 cassandra-3.11 trunk; do
         git checkout $branch
@@ -112,12 +112,12 @@ _main() {
       ;;
     "jvm-dtest")
       testlist=$( _list_tests "distributed" | grep -v "upgrade" | _split_tests "${split_chunk}")
-      ant testclasslist -Dtest.classlistprefix=distributed -Dtest.timeout=$(_timeout_for "test.distributed.timeout") -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" -Dtest.runners=1 || echo "failed $target"
+      ant testclasslist -Dtest.classlistprefix=distributed -Dtest.timeout=$(_timeout_for "test.distributed.timeout") -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
       ;;
     "jvm-dtest-upgrade")
       _build_all_dtest_jars
       testlist=$( _list_tests "distributed"  | grep "upgrade" | _split_tests "${split_chunk}")
-      ant testclasslist -Dtest.classlistprefix=distributed -Dtest.timeout=$(_timeout_for "test.distributed.timeout") -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" -Dtest.runners=1 || echo "failed $target"
+      ant testclasslist -Dtest.classlistprefix=distributed -Dtest.timeout=$(_timeout_for "test.distributed.timeout") -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
       ;;
     *)
       echo "unregconised \"$target\""
