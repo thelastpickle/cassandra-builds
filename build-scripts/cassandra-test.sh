@@ -5,6 +5,11 @@ set -o errexit
 set -o pipefail
 set -o nounset
 
+# pre-conditions
+command -v ant >/dev/null 2>&1 || { echo >&2 "ant needs to be installed"; exit 1; }
+command -v git >/dev/null 2>&1 || { echo >&2 "git needs to be installed"; exit 1; }
+[ -f "build.xml" ] || { echo >&2 "build.xml must exist"; exit 1; }
+
 # lists all tests for the specific test type
 _list_tests() {
   local -r classlistprefix="$1"
@@ -26,7 +31,7 @@ _timeout_for() {
 
 _build_all_dtest_jars() {
     cd $TMP_DIR
-    git clone --depth 1 --no-single-branch https://gitbox.apache.org/repos/asf/cassandra.git cassandra-dtest-jars
+    until git clone --quiet --depth 1 --no-single-branch https://github.com/apache/cassandra.git cassandra-dtest-jars ; do echo "git clone failed… trying again… " ; done
     cd cassandra-dtest-jars
     for branch in cassandra-2.2 cassandra-3.0 cassandra-3.11 trunk; do
         git checkout $branch
@@ -36,7 +41,7 @@ _build_all_dtest_jars() {
     done
     cd ../..
     rm -fR ${TMP_DIR}/cassandra-dtest-jars
-    ant dtest-jar
+    ant clean dtest-jar
     ls -l build/dtest*.jar
 }
 
@@ -74,50 +79,55 @@ _main() {
 
   export TMP_DIR="$(pwd)/tmp"
   mkdir -p ${TMP_DIR}
-  ant clean jar
 
   case $target in
     "stress-test")
-      # hard fail on test compilation, put dont fail the test run as unstable test reports are processed
-      ant stress-build-test
+      # hard fail on test compilation, but dont fail the test run as unstable test reports are processed
+      ant clean stress-build-test jar
       ant $target -Dtmp.dir="$(pwd)/tmp" || echo "failed $target"
       ;;
     "fqltool-test")
-      # hard fail on test compilation, put dont fail the test run so unstable test reports are processed
-      ant fqltool-build-test
+      # hard fail on test compilation, but dont fail the test run so unstable test reports are processed
+      ant clean fqltool-build-test jar
       ant $target -Dtmp.dir="$(pwd)/tmp" || echo "failed $target"
       ;;
     "microbench")
-      ant $target -Dtmp.dir="$(pwd)/tmp" -Dmaven.test.failure.ignore=true
+      ant clean $target -Dtmp.dir="$(pwd)/tmp" -Dmaven.test.failure.ignore=true
       ;;
     "test")
+      ant clean jar
       testlist="$( _list_tests "unit" | _split_tests "${split_chunk}")"
       ant testclasslist -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
       ;;
     "test-cdc")
+      ant clean jar
       testlist=$( _list_tests "unit" | _split_tests "${split_chunk}")
       ant testclasslist-cdc -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
       ;;
     "test-compression")
+      ant clean jar
       testlist=$( _list_tests "unit" | _split_tests "${split_chunk}")
       ant testclasslist-compression -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
       ;;
     "test-burn")
+      ant clean jar
       testlist=$( _list_tests "burn" | _split_tests "${split_chunk}")
       ant testclasslist -Dtest.classlistprefix=burn -Dtest.timeout=$(_timeout_for "test.burn.timeout") -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
       ;;
     "long-test")
+      ant clean jar
       testlist=$( _list_tests "long" | _split_tests "${split_chunk}")
       ant testclasslist -Dtest.classlistprefix=long -Dtest.timeout=$(_timeout_for "test.long.timeout") -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
       ;;
     "jvm-dtest")
+      ant clean jar
       testlist=$( _list_tests "distributed" | grep -v "upgrade" | _split_tests "${split_chunk}")
-      ant testclasslist -Dtest.classlistprefix=distributed -Dtest.timeout=$(_timeout_for "test.distributed.timeout") -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" -Dtest.runners=1 || echo "failed $target"
+      ant testclasslist -Dtest.classlistprefix=distributed -Dtest.timeout=$(_timeout_for "test.distributed.timeout") -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
       ;;
     "jvm-dtest-upgrade")
       _build_all_dtest_jars
       testlist=$( _list_tests "distributed"  | grep "upgrade" | _split_tests "${split_chunk}")
-      ant testclasslist -Dtest.classlistprefix=distributed -Dtest.timeout=$(_timeout_for "test.distributed.timeout") -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" -Dtest.runners=1 || echo "failed $target"
+      ant testclasslist -Dtest.classlistprefix=distributed -Dtest.timeout=$(_timeout_for "test.distributed.timeout") -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
       ;;
     *)
       echo "unregconised \"$target\""
