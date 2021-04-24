@@ -100,9 +100,9 @@ EOF
 
     # docker login to avoid rate-limiting apache images. credentials are expected to already be in place
     docker login || true
-    docker pull -q $DOCKER_IMAGE
-    mkdir -p build/test/logs
+    [[ "$(docker images -q $DOCKER_IMAGE 2>/dev/null)" != "" ]] || docker pull -q $DOCKER_IMAGE
 
+    mkdir -p build/test/logs
     declare -a DOCKER_IDS
     declare -a PROCESS_IDS
     declare -a STATUSES
@@ -119,6 +119,7 @@ EOF
         DOCKER_IDS+=( $docker_id )
     done
 
+    exit_result=0
     i=0
     for process_id in "${PROCESS_IDS[@]}" ; do
         # wait for each container to complete
@@ -141,6 +142,7 @@ EOF
             docker info
             echo "–––"
             dmesg
+            exit_result=1
         else
             echo "${docker_id} done (${status}), copying files"
             docker cp "$docker_id:/home/cassandra/cassandra/${TARGET}-${inner_split}-${INNER_SPLITS}-cassandra.head" .
@@ -152,4 +154,5 @@ EOF
     done
 
     xz build/test/logs/docker_attach_*.log
+    exit $exit_result
 fi
