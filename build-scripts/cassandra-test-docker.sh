@@ -27,7 +27,7 @@ if [ "$#" -lt 3 ]; then
     cd cassandra
     echo "cassandra-test.sh (${1} ${2}) cassandra: `git log -1 --pretty=format:'%h %an %ad %s'`" | tee "${1}-$(echo $2 | sed 's/\//-/')-cassandra.head"
     echo "cassandra-test.sh (${1} ${2}) cassandra-builds: `git -C ../cassandra-builds log -1 --pretty=format:'%h %an %ad %s'`" | tee -a "${1}-$(echo $2 | sed 's/\//-/')-cassandra.head"
-    bash ../cassandra-builds/build-scripts/cassandra-test.sh "$@"
+    ../cassandra-builds/build-scripts/cassandra-test.sh "$@"
     if [ -d build/test/logs ]; then find build/test/logs -type f -name "*.log" | xargs xz -qq ; fi
 else
 
@@ -66,10 +66,11 @@ EOF
 
     # for relevant test targets calculate how many docker containers we should split the test list over
     case $TARGET in
-      "stress-test" | "fqltool-test" | "microbench")
+      # test-burn doesn't have enough tests in it to split beyond 8
+      "stress-test" | "fqltool-test" | "microbench" | "test-burn")
           docker_runs=1
         ;;
-      "test"| "test-cdc" | "test-compression" | "test-burn" | "long-test" | "jvm-dtest" | "jvm-dtest-upgrade")
+      "test"| "test-cdc" | "test-compression" | "long-test" | "jvm-dtest" | "jvm-dtest-upgrade")
           cores=1
           cores=$(nproc --all)
           mem=1
@@ -111,7 +112,7 @@ EOF
         inner_split=$(( $INNER_SPLIT_FIRST + ( $i - 1 ) ))
         # start the container
         echo "cassandra-test-docker.sh: running: git clone --quiet --single-branch --depth 1 --branch $BUILDSBRANCH $BUILDSREPO; bash ./cassandra-builds/build-scripts/cassandra-test-docker.sh $TARGET ${inner_split}/${INNER_SPLITS}"
-        docker_id=$(docker run -m 5g --memory-swap 5g --env-file env.list -dt $DOCKER_IMAGE dumb-init bash -ilc "until git clone --quiet --single-branch --depth 1 --branch $BUILDSBRANCH $BUILDSREPO ; do echo 'git clone failed… trying again… ' ; done ; bash ./cassandra-builds/build-scripts/cassandra-test-docker.sh ${TARGET} ${inner_split}/${INNER_SPLITS}")
+        docker_id=$(docker run -m 5g --memory-swap 5g --env-file env.list -dt $DOCKER_IMAGE dumb-init bash -ilc "until git clone --quiet --single-branch --depth 1 --branch $BUILDSBRANCH $BUILDSREPO ; do echo 'git clone failed… trying again… ' ; done ; ./cassandra-builds/build-scripts/cassandra-test-docker.sh ${TARGET} ${inner_split}/${INNER_SPLITS}")
 
         # capture logs and pid for container
         docker attach --no-stdin $docker_id > build/test/logs/docker_attach_${i}.log &
@@ -127,9 +128,11 @@ EOF
         inner_split=$(( $INNER_SPLIT_FIRST + $i ))
         cat build/test/logs/docker_attach_$(( $i + 1 )).log
         tail -F build/test/logs/docker_attach_$(( $i + 1 )).log &
+        tail_process=$!
         wait $process_id
         status=$?
         PROCESS_IDS+=( $status )
+        kill $tail_process
 
         if [ "$status" -ne 0 ] ; then
             echo "${docker_id} failed (${status}), debug…"

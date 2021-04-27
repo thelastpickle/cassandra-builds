@@ -45,6 +45,20 @@ _build_all_dtest_jars() {
     ls -l build/dtest*.jar
 }
 
+_run_testlist() {
+    local _target_prefix=$1
+    local _testlist_target=$2
+    local _split_chunk=$3
+    local _test_timeout=$4
+    testlist="$( _list_tests "${_target_prefix}" | _split_tests "${_split_chunk}")"
+    if ! [[ -z "$testlist" ]]; then
+      ant clean jar
+      ant $_testlist_target -Dtest.classlistprefix="${_target_prefix}" -Dtest.classlistfile=<(echo "${testlist}") -Dtest.timeout="${_test_timeout}" -Dtmp.dir="${TMP_DIR}" || echo "failed ${_target_prefix} ${$_testlist_target}"
+    else
+      echo Skipping ${_target_prefix} ${_testlist_target}, no tests in split ${_split_chunk}
+    fi
+}
+
 _main() {
   # parameters
   local -r target="${1:-}"
@@ -95,39 +109,37 @@ _main() {
       ant clean $target -Dtmp.dir="$(pwd)/tmp" -Dmaven.test.failure.ignore=true
       ;;
     "test")
-      ant clean jar
-      testlist="$( _list_tests "unit" | _split_tests "${split_chunk}")"
-      ant testclasslist -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
+      _run_testlist "unit" "testclasslist" "${split_chunk}" "$(_timeout_for 'test.timeout')"
       ;;
     "test-cdc")
-      ant clean jar
-      testlist=$( _list_tests "unit" | _split_tests "${split_chunk}")
-      ant testclasslist-cdc -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
+      _run_testlist "unit" "testclasslist-cdc" "${split_chunk}" "$(_timeout_for 'test.timeout')"
       ;;
     "test-compression")
-      ant clean jar
-      testlist=$( _list_tests "unit" | _split_tests "${split_chunk}")
-      ant testclasslist-compression -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
+      _run_testlist "unit" "testclasslist-compression" "${split_chunk}" "$(_timeout_for 'test.timeout')"
       ;;
     "test-burn")
-      ant clean jar
-      testlist=$( _list_tests "burn" | _split_tests "${split_chunk}")
-      ant testclasslist -Dtest.classlistprefix=burn -Dtest.timeout=$(_timeout_for "test.burn.timeout") -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
+      _run_testlist "burn" "testclasslist" "${split_chunk}" "$(_timeout_for 'test.burn.timeout')"
       ;;
     "long-test")
-      ant clean jar
-      testlist=$( _list_tests "long" | _split_tests "${split_chunk}")
-      ant testclasslist -Dtest.classlistprefix=long -Dtest.timeout=$(_timeout_for "test.long.timeout") -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
+      _run_testlist "long" "testclasslist" "${split_chunk}" "$(_timeout_for 'test.long.timeout')"
       ;;
     "jvm-dtest")
       ant clean jar
       testlist=$( _list_tests "distributed" | grep -v "upgrade" | _split_tests "${split_chunk}")
-      ant testclasslist -Dtest.classlistprefix=distributed -Dtest.timeout=$(_timeout_for "test.distributed.timeout") -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
+      if ! [[ -z "$testlist" ]]; then
+        ant testclasslist -Dtest.classlistprefix=distributed -Dtest.timeout=$(_timeout_for "test.distributed.timeout") -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
+      else
+        echo "Skipping $target, no tests in split ${split_chunk}"
+      fi
       ;;
     "jvm-dtest-upgrade")
       _build_all_dtest_jars
       testlist=$( _list_tests "distributed"  | grep "upgrade" | _split_tests "${split_chunk}")
-      ant testclasslist -Dtest.classlistprefix=distributed -Dtest.timeout=$(_timeout_for "test.distributed.timeout") -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
+      if ! [[ -z "$testlist" ]]; then
+        ant testclasslist -Dtest.classlistprefix=distributed -Dtest.timeout=$(_timeout_for "test.distributed.timeout") -Dtest.classlistfile=<(echo "${testlist}") -Dtmp.dir="${TMP_DIR}" || echo "failed $target"
+      else
+        echo "Skipping $target, no tests in split ${split_chunk}"
+      fi
       ;;
     *)
       echo "unregconised \"$target\""
