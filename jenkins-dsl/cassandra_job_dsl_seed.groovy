@@ -193,9 +193,6 @@ matrixJob('Cassandra-template-test') {
         }
         timestamps()
     }
-    throttleConcurrentBuilds {
-        categories(['Cassandra'])
-    }
     properties {
         githubProjectUrl(githubRepo)
         priorityJobProperty {
@@ -844,9 +841,6 @@ testTargets.each {
                 noActivity(1200)
             }
             timestamps()
-        }
-        throttleConcurrentBuilds {
-            categories(['Cassandra'])
         }
         parameters {
             stringParam('REPO', 'apache', 'The github user/org to clone cassandra repo from')
