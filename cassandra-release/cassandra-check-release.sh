@@ -116,3 +116,30 @@ wait "$PID"
 if ! $success ; then
     echo "Redhat package FAILED"
 fi
+
+# Commented this out as it was just for my testing (when we don't have artefacts in staging). Directory structures I get are different to those the script seems to expect (e.g. I have .../redhat/311x/, script seems to expect .../311x/redhat).
+# wget -Nqe robots=off --recursive --no-parent https://downloads.apache.org/cassandra/redhat/311x/
+# wget https://downloads.apache.org/cassandra/KEYS
+# cd downloads.apache.org/cassandra/
+# mv redhat/311x/* redhat/ 
+mv KEYS redhat 
+
+echo
+rm -f procfifo
+mkfifo procfifo
+docker run -i -v `pwd`/redhat:/redhat centos timeout 180 /bin/bash -c "( rpm --import /redhat/KEYS; rpm -K /redhat/*.rpm);" 2>&1  >procfifo &
+PID=$!
+failed=false
+while read LINE; do 
+    if [[ $LINE =~ ".*digests SIGNATURES NOT OK" ]] ; then
+        echo "RPM verification error."
+        kill "$PID"; 
+        failed=true; 
+        break;
+    fi
+done < procfifo
+rm -f procfifo
+wait "$PID"
+if [[ $failed == false ]]; then
+    echo "RPMs verified correctly."
+fi
