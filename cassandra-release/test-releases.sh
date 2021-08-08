@@ -26,7 +26,7 @@ function test_deb() {
         HEAP_NEWSIZE=500m MAX_HEAP_SIZE=1g cassandra -R -f
         "
     rm -f procfifo && mkfifo procfifo
-    docker run -i openjdk:8-jdk-slim-buster timeout 180 /bin/bash -c $COMMAND 2>&1 >procfifo &
+    docker run -i openjdk:8-jdk-slim-buster timeout 360 /bin/bash -c $COMMAND 2>&1 >procfifo &
     PID=$!
     success=false
     while read LINE && ! $success ; do
@@ -72,7 +72,7 @@ yum install -y cassandra;
 cassandra -R -f 
 "
     rm -f procfifo && mkfifo procfifo
-    docker run -i centos timeout 180 /bin/bash -c $COMMAND 2>&1 >procfifo &
+    docker run -i centos timeout 360 /bin/bash -c $COMMAND 2>&1 >procfifo &
     PID=$!
     success=false
     while read LINE && ! $success ; do
