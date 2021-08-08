@@ -5,7 +5,7 @@
 # It would be ideal to find a way to auto-discover all known releases and test them. As is, this is stored in an array, below.
 
 
-RELEASES=(311x 40x 30x 22x)
+RELEASES=(40x 311x 30x 22x)
 
 ########################################################
 # Check Debian #########################################
@@ -23,7 +23,7 @@ function test_deb() {
         # sudo apt-key adv --keyserver pool.sks-keyservers.net --recv-key A278B781FE4B2BDA; 
         sudo apt-get update;
         sudo apt-get install -y cassandra) 2>/dev/null;
-        CASSANDRA_CONF=file:///etc/cassandra/ HEAP_NEWSIZE=500m MAX_HEAP_SIZE=1g cassandra -R -f
+        HEAP_NEWSIZE=500m MAX_HEAP_SIZE=1g cassandra -R -f
         "
     rm -f procfifo && mkfifo procfifo
     docker run -i openjdk:8-jdk-slim-buster timeout 180 /bin/bash -c $COMMAND 2>&1 >procfifo &
@@ -31,7 +31,7 @@ function test_deb() {
     success=false
     while read LINE && ! $success ; do
         if [[ $LINE =~ "Starting listening for CQL clients on" ]] ; then
-            echo "Debian package OK"
+            echo "$CASSANDRA_VER Debian package OK"
             kill "$PID"
             success=true
         fi
@@ -46,3 +46,50 @@ function test_deb() {
 for i in $RELEASES; do 
   test_deb $i;
 done;
+
+
+#######################################################
+# Check RPMs ##########################################
+#######################################################
+
+function test_rpm() {
+    CASSANDRA_VER=$1
+    echo
+    echo "testing Cassandra version $CASSANDRA_VER"
+    # Heredoc is really ugly here and forces us to do terrible things with the indentation but I don't know how to make it nicer. Suggestions welcome.
+    COMMAND="( yum install -y java-1.8.0-openjdk ; 
+cat <<EOF > /etc/yum.repos.d/cassandra.repo
+[cassandra]
+name=Apache Cassandra
+baseurl=https://downloads.apache.org/cassandra/redhat/${CASSANDRA_VER}/
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://downloads.apache.org/cassandra/KEYS
+EOF
+cat /etc/yum.repos.d/cassandra.repo
+yum install -y cassandra;
+) 2>/dev/null;
+cassandra -R -f 
+"
+    rm -f procfifo && mkfifo procfifo
+    docker run -i centos timeout 180 /bin/bash -c $COMMAND 2>&1 >procfifo &
+    PID=$!
+    success=false
+    while read LINE && ! $success ; do
+        if [[ $LINE =~ "Starting listening for CQL clients on" ]] ; then
+            echo "$CASSANDRA_VER Debian package OK"
+            kill "$PID"
+            success=true
+        fi
+    done < procfifo
+
+    rm -f procfifo
+    wait "$PID"
+    if ! $success ; then
+        echo "$CASSANDRA_VER Redhat package FAILED"
+    fi
+}
+
+for i in $RELEASES; do 
+  test_rpm $i;
+done
