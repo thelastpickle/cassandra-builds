@@ -39,13 +39,13 @@ cd tmp-ci-cassandra.apache.org
                 for build_number in $(seq $((${latest_saved}+1)) ${latest}) ; do
                     main_url="https://ci-cassandra.apache.org/job/Cassandra-${pipeline}${job_suffix}/${build_number}/"
                     wget -q -E -N -k -p $main_url
-                    if [[ $job_suffix -ne "-artifacts" ]] ; then
+                    #if [[ $job_suffix -ne "-artifacts" ]] ; then
                         wget -q -E -N -k -p ${main_url}/testReport/
                         if test -f ci-cassandra.apache.org/job/Cassandra-${pipeline}${job_suffix}/${build_number}/testReport ; then
                             mkdir -p ci-cassandra.apache.org/blue/organizations/jenkins/Cassandra-${pipeline}${job_suffix}/detail/Cassandra-${pipeline}${job_suffix}/${build_number}/pipeline
                             cp ci-cassandra.apache.org/job/Cassandra-${pipeline}${job_suffix}/${build_number}/testReport/index.html ci-cassandra.apache.org/blue/organizations/jenkins/Cassandra-${pipeline}${job_suffix}/detail/Cassandra-${pipeline}${job_suffix}/${build_number}/pipeline/
                         fi
-                    fi
+                    #fi
                     echo "Saved Cassandra-${pipeline}${job_suffix}/${build_number}"
                     exit 0
                 done
