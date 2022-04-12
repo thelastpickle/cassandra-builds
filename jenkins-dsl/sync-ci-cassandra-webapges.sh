@@ -19,7 +19,7 @@ fi
         echo "Searching Cassandra-${pipeline}${job_suffix}"
         latest_url="https://ci-cassandra.apache.org/job/Cassandra-${pipeline}${job_suffix}/lastSuccessfulBuild/api/json?tree=number"
         if curl --output /dev/null --silent --head --fail ${latest_url}; then
-            latest=$(curl -s ${latest_url} | ../jq '.number')
+            latest=$(curl -s ${latest_url} | ./jq '.number')
             latest_saved=0
             for latest_saved in $(seq ${latest_saved} ${latest}) ; do
               next_build=$((${latest_saved}+1))
