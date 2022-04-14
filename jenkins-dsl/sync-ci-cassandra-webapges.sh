@@ -55,7 +55,7 @@ fi
                 done
             fi
             if (( ${latest} > ${latest_testreport_saved} )) ; then
-                for build_number in $(seq $((${latest_testreport_saved}+1)) ${latest}) ; do
+                for build_number in $(seq $((${latest_testreport_saved}+1)) ${latest}) ; do 
                     main_url="https://ci-cassandra.apache.org/job/Cassandra-${pipeline}${job_suffix}/${build_number}/"
                     if curl --output /dev/null --silent --head --fail "https://nightlies.apache.org/cassandra/ci-cassandra.apache.org/job/Cassandra-${pipeline}${job_suffix}/${next_build}/testReport" ; then
                       wget -q -E -N -k -p ${main_url}/testReport/
