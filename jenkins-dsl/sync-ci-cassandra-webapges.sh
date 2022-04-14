@@ -48,7 +48,7 @@ fi
                       wget -q -E -N -k -p $main_url
                       mkdir ci-cassandra.apache.org/job/Cassandra-${pipeline}${job_suffix}/${build_number}/testReport
                     else
-                      mkdir ci-cassandra.apache.org/job/Cassandra-${pipeline}${job_suffix}/${build_number}
+                      mkdir -p ci-cassandra.apache.org/job/Cassandra-${pipeline}${job_suffix}/${build_number}
                     fi
                     echo "Saved Cassandra-${pipeline}${job_suffix}/${build_number}"
                     exit 0
@@ -64,7 +64,7 @@ fi
                           cp ci-cassandra.apache.org/job/Cassandra-${pipeline}${job_suffix}/${build_number}/testReport/index.html ci-cassandra.apache.org/blue/organizations/jenkins/Cassandra-${pipeline}${job_suffix}/detail/Cassandra-${pipeline}${job_suffix}/${build_number}/pipeline/
                       fi
                     else
-                      mkdir ci-cassandra.apache.org/job/Cassandra-${pipeline}${job_suffix}/${build_number}/testReport
+                      mkdir -p ci-cassandra.apache.org/job/Cassandra-${pipeline}${job_suffix}/${build_number}/testReport
                     fi
                     echo "Saved testReport Cassandra-${pipeline}${job_suffix}/${build_number}"
                     exit 0
