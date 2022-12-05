@@ -245,7 +245,12 @@ then
     execute "cd cassandra"
     execute "git checkout $release-tentative"
     execute "ant realclean"
-    execute "ant publish -Drelease=true -Dbase.version=$release"
+    if [ -f .build/package-artifacts.sh ] ; then
+        # from 5.0 we build in a debian docker image
+        execute ".build/package-artifacts.sh"
+        # FIXME pass in " -Drelease=true"
+    fi
+    execute "ant publish -Drelease=true"
 
     echo "Artifacts uploaded, find the staging repository on repository.apache.org, \"Close\" it, and indicate its staging number:" 1>&3 2>&4
     read -p "staging number? " staging_number 1>&3 2>&4
@@ -280,7 +285,14 @@ then
 
     echo "Building debian package ..." 1>&3 2>&4
 
-    execute "${cassandra_builds_dir}/build-scripts/cassandra-deb-packaging.sh ${release}-tentative"
+    if [ -f $tmp_dir/cassandra/.build/package-debian.sh ] ; then
+        execute "cd $tmp_dir/cassandra"
+        execute ".build/package-debian.sh"
+        # FIXME binaries where ??
+        execute "cd $tmp_dir/$debian_package_dir/$deb_dir"
+    else
+        execute "${cassandra_builds_dir}/build-scripts/cassandra-deb-packaging.sh ${release}-tentative"
+    fi
 
     # Debsign might ask the passphrase on stdin so don't hide what he says even if no verbose
     # (I haven't tested carefully but I've also seen it fail unexpectedly with it's output redirected.
@@ -332,7 +344,14 @@ then
     [ ! -e "$rpm_dir" ] || rm -rf $rpm_dir
     execute "mkdir $rpm_dir"
 
-    execute "${cassandra_builds_dir}/build-scripts/cassandra-rpm-packaging.sh ${release}-tentative 8 rpm"
+    if [ -f $tmp_dir/cassandra/.build/package-redhat.sh ] ; then
+        execute "cd $tmp_dir/cassandra"
+        execute ".build/package-redhat.sh rpm"
+        # FIXME binaries where ??
+        execute "cd $tmp_dir/$rpm_package_dir/$rpm_dir"
+    else
+        execute "${cassandra_builds_dir}/build-scripts/cassandra-rpm-packaging.sh ${release}-tentative 8 rpm"
+    fi
 
     execute "rpmsign --addsign ${rpm_dir}/*.rpm"
 
@@ -360,7 +379,14 @@ then
         [ ! -e "$rpm_dir" ] || rm -rf $rpm_dir
         execute "mkdir $rpm_dir"
 
-        execute "${cassandra_builds_dir}/build-scripts/cassandra-rpm-packaging.sh ${release}-tentative 8 noboolean"
+        if [ -f $tmp_dir/cassandra/.build/package-redhat.sh ] ; then
+            execute "cd $tmp_dir/cassandra"
+            execute ".build/package-redhat.sh noboolean"
+            # FIXME binaries where ??
+            execute "cd $tmp_dir/$rpm_package_dir/$rpm_dir"
+        else
+            execute "${cassandra_builds_dir}/build-scripts/cassandra-rpm-packaging.sh ${release}-tentative 8 noboolean"
+        fi
 
         execute "rpmsign --addsign ${rpm_dir}/*.rpm"
 
