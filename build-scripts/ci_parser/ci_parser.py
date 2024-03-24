@@ -1,4 +1,20 @@
 #!/usr/bin/env python3
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 
 """
 Script to take an arbitrary root directory of subdirectories of junit output format and create a summary .html file
@@ -10,7 +26,6 @@ import cProfile
 import pstats
 import os
 import shutil
-import tarfile
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Dict, List, IO, Optional, Tuple, Type
@@ -19,11 +34,7 @@ from pathlib import Path
 from junit_helpers import JUnitResultBuilder, JUnitTestCase, JUnitTestSuite, JUnitTestStatus, LOG_FILE_NAME
 from logging_helper import build_logger, mute_logging, CustomLogger
 
-try:
-    from bs4 import BeautifulSoup
-except ImportError:
-    print('bs4 not installed; make sure you have bs4 in your active python env.')
-    exit(1)
+from bs4 import BeautifulSoup
 
 
 parser = argparse.ArgumentParser(description="""
@@ -52,7 +63,13 @@ if args.mute:
 
 def main():
     check_file_condition(lambda: os.path.exists(args.input), f'Cannot find {args.input}. Aborting.')
-    check_file_condition(lambda: os.path.exists(args.output), 'This mode is designed to insert a table into an existing .html file. Cannot proceed.')
+
+    # if needed create a blank ci_summary.html
+    if not os.path.exists(args.output):
+        with open(args.output, "w") as ci_summary_html:
+            ci_summary_html.write('<html><head><body><h1>CI Summary – Test Failures</h1></body></head></html>')
+
+
     test_suites = extract_junit_from_test_run(args.input)
     for suite in test_suites.values():
         logger.info(f'Suite: {suite.name()}')
@@ -68,31 +85,31 @@ def main():
 
 def extract_junit_from_test_run(input_dir: str) -> Dict[str, JUnitTestSuite]:
     """
-    For a given input input_dir, will find all .gz files in that tree, extract files from them preserving input_dir structure
+    For a given input input_dir, will find all .xml files in that tree, extract files from them preserving input_dir structure
     and parse out all found junit test results into the global test result containers.
-    :param input_dir: Input directory to recursively search for .gz files
+    :param input_dir: Input directory to recursively search for .xml files
     """
 
     # Skip archives that we know exist but don't have results we want.
-    gz_exclusions = ['split', 'result_details']
+    xml_exclusions = ['split', 'result_details']
 
     # Inclusions win over exclusions right now but are empty by default.
 
     # TODO: Make this a command-line regex? Used for debugging; could use to parse just a certain subset of suites.
-    gz_inclusions = None  # type: Optional[List[str]]
-    # gz_inclusions = ['python']
+    xml_inclusions = None  # type: Optional[List[str]]
+    # xml_inclusions = ['python']
 
     # TODO: Make this a command-line debug flag? Used for debugging
     debug_file = None  # type: Optional[str]
-    # debug_file = 'jvm17-utests_archive.tar.gz'
+    # debug_file = 'jvm17-utests_archive.tar.xml'
     if debug_file is not None:
-        gz_files = [str(file) for file in Path(input_dir).rglob('*.gz') if debug_file in str(file)]
-    elif gz_inclusions is not None:
-        gz_files = [str(file) for file in Path(input_dir).rglob('*.gz') if any(x in str(file) for x in gz_inclusions)]
+        xml_files = [str(file) for file in Path(input_dir).rglob('*.xml') if debug_file in str(file)]
+    elif xml_inclusions is not None:
+        xml_files = [str(file) for file in Path(input_dir).rglob('*.xml') if any(x in str(file) for x in xml_inclusions)]
     else:
-        gz_files = [str(file) for file in Path(input_dir).rglob('*.gz') if not any(x in str(file) for x in gz_exclusions)]
-    check_file_condition(lambda: len(gz_files) != 0, f'Found 0 .gz files in path: {input_dir}. Cannot proceed with .xml extraction.')
-    logger.debug(f'Extracting .xml from {len(gz_files)} gzip files from path: {input_dir}')
+        xml_files = [str(file) for file in Path(input_dir).rglob('*.xml') if not any(x in str(file) for x in xml_exclusions)]
+    check_file_condition(lambda: len(xml_files) != 0, f'Found 0 .xml files in path: {input_dir}. Cannot proceed with .xml extraction.')
+    logger.debug(f'Extracting .xml from {len(xml_files)} xml files from path: {input_dir}')
 
     archive_count = 0
     test_file_count = 0
@@ -100,18 +117,18 @@ def extract_junit_from_test_run(input_dir: str) -> Dict[str, JUnitTestSuite]:
 
     test_suites = dict()  # type: Dict[str, JUnitTestSuite]
 
-    logger.info('List of gzip files to be processed:')
-    for file in gz_files:
+    logger.info('List of xml files to be processed:')
+    for file in xml_files:
         logger.info(f' -- {file}')
 
-    # Since we have a 1:1 ratio on .gz files to suites, we can parallelize w/out any kind of synchronization. We also
+    # Since we have a 1:1 ratio on .xml files to suites, we can parallelize w/out any kind of synchronization. We also
     # check to ensure this contract is upheld in the processing method.
     with ThreadPoolExecutor() as executor:
-        futures = [executor.submit(process_gzip_file, gz_file, input_dir, test_suites) for gz_file in gz_files]
+        futures = [executor.submit(process_xml_file, xml_file, input_dir, test_suites) for xml_file in xml_files]
         for future in as_completed(futures):
             exception = future.exception()
             if exception is not None:
-                logger.critical('Saw an exception processing .gzip file. Aborting.')
+                logger.critical('Saw an exception processing .xml file. Aborting.')
                 raise exception
             else:
                 files, tests = future.result()
@@ -139,51 +156,50 @@ def extract_junit_from_test_run(input_dir: str) -> Dict[str, JUnitTestSuite]:
     return test_suites
 
 
-def process_gzip_file(gz_file: str, input_dir: str, test_suites: Dict[str, JUnitTestSuite]) -> Tuple[int, int]:
+def process_xml_file(xml_file: str, input_dir: str, test_suites: Dict[str, JUnitTestSuite]) -> Tuple[int, int]:
     """
-    Pretty straightforward here - we unpack all our .gz files, walk through any .xml files in there and look for tests,
+    Pretty straightforward here - we unpack all our .xml files, walk through any .xml files in there and look for tests,
     parsing them out into our global JUnitTestCase Dicts as we find them
 
-    No thread safety on target Dict -> relying on the "one .gz per suite" rule to keep things clean
+    No thread safety on target Dict -> relying on the "one .xml per suite" rule to keep things clean
 
     This takes place in the context of an executor thread
     :return: Tuple[file count, test count]
     """
-    # Leading part of non-root portion of path needs to correlate to job / pipeline name. We'll group by those.
-    logger.debug(f'Replacing input_dir: {input_dir} in path: {gz_file}.')
-    suite_name = gz_file.replace(input_dir, '').lstrip('/').split('/')[0]
-    logger.progress(f'Processing archive: {gz_file} for test suite: {suite_name}')
 
-    # And make sure we're not racing
-    if suite_name in test_suites:
-        log_and_raise(f'Got a duplicate suite_name - this will lead to race conditions. Suite: {suite_name}. gz file: {gz_file}. Aborting', AssertionError)
-    else:
-        test_suites[suite_name] = JUnitTestSuite(suite_name)
+    # TODO: In extreme cases (python upgrade dtests), this could theoretically be a HUGE file we're materializing in memory. Consider .iterparse or tag sanitization using sed first.
+    with open(xml_file, "rb") as xml_input:
+        try:
+            root = ET.parse(xml_input).getroot()  # type: ignore
 
-    active_suite = test_suites[suite_name]
-    # Store this for later logging if we have a failed job; help the user know where to look next.
-    active_suite.set_archive(gz_file)
-    active_file = ''
-    test_file_count = 0
-    test_count = 0
-    try:
-        with tarfile.open(gz_file, 'r:gz') as tar:
-            # Since we can theoretically have duplicate members of .xml files modified at different times, we build up a
-            # list of whatever the latest sequential member of any .xml file is and then use that.
-            for member in tar.getmembers():
-                if '.xml' in member.name:
-                    file_name = member.name.split('/')[-1]
-                    active_file = file_name
-                    fc = extract_test_cases(active_suite, file_name, tar.extractfile(member))
-                    if fc != 0:
-                        test_file_count += 1
-                        test_count += fc
-    except EOFError:
-        logger.error(f'EOFError on {gz_file}. Skipping; will be missing results for {suite_name}')
-        return 0, 0
-    except Exception as e:
-        logger.critical(f'Got unexpected error while parsing {gz_file} on file: {active_file}: {e}. Aborting.')
-        raise e
+            suite_name = str(root.get('name'))
+            logger.progress(f'Processing archive: {xml_file} for test suite: {suite_name}')
+
+            # And make sure we're not racing
+            if suite_name in test_suites:
+                logger.error(f'Got a duplicate suite_name - this will lead to race conditions. Suite: {suite_name}. xml file: {xml_file}. Skipping this file.')
+                return 0,0
+            else:
+                test_suites[suite_name] = JUnitTestSuite(suite_name)
+
+            active_suite = test_suites[suite_name]
+            # Store this for later logging if we have a failed job; help the user know where to look next.
+            active_suite.set_archive(xml_file)
+            active_file = ''
+            test_file_count = 0
+            test_count = 0
+            if '.xml' in xml_file:
+                active_file = xml_file
+                fc = extract_test_cases(active_suite, xml_file, root)
+                if fc != 0:
+                    test_file_count += 1
+                    test_count += fc
+        except (EOFError, ET.ParseError) as e:
+            logger.error(f'Error on {xml_file}: {e}. Skipping; will be missing results for {suite_name}')
+            return 0, 0
+        except Exception as e:
+            logger.critical(f'Got unexpected error while parsing {xml_file} on file: {active_file}: {e}. Aborting.')
+            raise e
     return test_file_count, test_count
 
 
@@ -193,7 +209,7 @@ def print_errors(suite: JUnitTestSuite) -> None:
         logger.warning(f'{testcase}')
 
 
-def extract_test_cases(suite: JUnitTestSuite, file_name: str, file_contents: Optional[IO[bytes]]) -> int:
+def extract_test_cases(suite: JUnitTestSuite, file_name: str, root) -> int:
     """
     For a given input .xml, will extract all JUnitTestCase matching objects and store them in the global registry keyed off
     suite name.
@@ -207,9 +223,6 @@ def extract_test_cases(suite: JUnitTestSuite, file_name: str, file_contents: Opt
     xml_exclusions = ['logback', 'checkstyle']
     if any(x in file_name for x in xml_exclusions):
         return 0
-
-    # TODO: In extreme cases (python upgrade dtests), this could theoretically be a HUGE file we're materializing in memory. Consider .iterparse or tag sanitization using sed first.
-    root = ET.parse(file_contents).getroot()  # type: ignore
 
     # Search inside entire hierarchy since sometimes it's at the root and sometimes one level down.
     test_count = len(root.findall('.//testcase'))
