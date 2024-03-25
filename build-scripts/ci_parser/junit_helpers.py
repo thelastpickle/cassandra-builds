@@ -70,10 +70,10 @@ class JUnitResultBuilder:
     templating combined with BeautifulSoup means things are... very very particular. Bad parsing on things from the .sh
     or other sources can make bs4 replace things in weird ways.
     """
-    def __init__(self, name: str, failures: int) -> None:
+    def __init__(self, name: str) -> None:
         self._name = name
-        self._failures = failures
         self._labels = []  # type: List[str]
+        self._column_styles = []  # type: List[str]
         self._rows = []  # type: List[List[str]]
         self._header = ['unknown', 'unknown', 'unknown', 'unknown']
 
@@ -81,24 +81,21 @@ class JUnitResultBuilder:
         # otherwise.
         self._template = Template('''
         <table class="table-fixed">
-          <tr style = "height: 18px; background-color: black; color: white;">
-            <th> {{header}} </th>
-            <th></th>
-            <th></th>
-            <th></th>
+          <tr style = "height: 18px;">
+            <th colspan="4"> {{header}} </th>
           </tr>
           <tr>
-            <th>{{ labels[0] }}</td>
-            <th>{{ labels[1] }}</td>
-            <th>{{ labels[2] }}</td>
-            <th>{{ labels[3] }}</td>
+            <th style="{{ column_styles[0] }}">{{ labels[0] }}</td>
+            <th style="{{ column_styles[1] }}">{{ labels[1] }}</td>
+            <th style="{{ column_styles[2] }}">{{ labels[2] }}</td>
+            <th style="{{ column_styles[3] }}">{{ labels[3] }}</td>
           </tr>
           {% for row in rows %}
           <tr>
-            <td>{{ row[0] }}</td>
-            <td>{{ row[1] }}</td>
-            <td>{{ row[2] }}</td>
-            <td>{{ row[3] }}</td>
+            <td style="{{ column_styles[0] }}">{{ row[0] }}</td>
+            <td style="{{ column_styles[1] }}">{{ row[1] }}</td>
+            <td style="{{ column_styles[2] }}">{{ row[2] }}</td>
+            <td style="{{ column_styles[3] }}">{{ row[3] }}</td>
           </tr>
           {% endfor %}
         </table>
@@ -112,31 +109,21 @@ class JUnitResultBuilder:
         """
         style_tag = soup.new_tag("style")
         style_tag.string = """
+        table, tr {
+            border: 1px solid black; border-collapse: collapse;
+        }
         .table-fixed {
             table-layout: fixed;
             width: 100%;
         }
-        .table-fixed th:nth-child(1), .table-fixed td:nth-child(1),
-        .table-fixed th:nth-child(2), .table-fixed td:nth-child(2) {
-            width: 15%;
-            text-align: left;
-            word-break: break-all;
-        }
-        .table-fixed th:nth-child(3), .table-fixed td:nth-child(3) {
-            width: 60%;
-            text-align: left;
-        }
-        .table-fixed th:nth-child(4), .table-fixed td:nth-child(4) {
-            width: 10%;
-            text-align: right;
-        }
         """
         soup.head.append(style_tag)
 
-    def label_columns(self, cols: List[str]) -> None:
+    def label_columns(self, cols: List[str], column_styles: List[str]) -> None:
         if len(cols) != 4:
             raise AssertionError(f'Got invalid number of columns on label_columns: {len(cols)}. Expected: 4.')
         self._labels = cols
+        self._column_styles = column_styles
 
     def add_row(self, row: List[str]) -> None:
         if len(row) != 4:
@@ -144,7 +131,7 @@ class JUnitResultBuilder:
         self._rows.append(row)
 
     def build_table(self) -> str:
-        return self._template.render(header=f'{self._name} failures: {self._failures}', labels=self._labels, rows=self._rows)
+        return self._template.render(header=f'{self._name}', labels=self._labels, column_styles=self._column_styles, rows=self._rows)
 
 
 class JUnitTestCase:
@@ -222,12 +209,8 @@ class JUnitTestCase:
         _check_for_child_element(JUnitTestStatus.ERROR)
         _check_for_child_element(JUnitTestStatus.SKIPPED)
 
-    @staticmethod
-    def headers() -> List[str]:
-        return ['Class', 'Method', 'Output', 'Duration']
-
     def row_data(self) -> List[str]:
-        return [self._class_name, self._test_name, self._message, str(self._time)]
+        return [self._class_name, self._test_name, f"<pre>{self._message}</pre>", str(self._time)]
 
     def status(self) -> JUnitTestStatus:
         return self._status
