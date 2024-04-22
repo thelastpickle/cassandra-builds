@@ -30,8 +30,8 @@ def slaveArm64Label = 'cassandra-arm64'
 def slaveArm64DtestLabel = 'cassandra-arm64-dtest'
 def slaveArm64DtestLargeLabel = 'cassandra-arm64-dtest-large'
 def mainRepo = "https://github.com/apache/cassandra"
-def buildsRepo = "https://github.com/apache/cassandra-builds"
-def buildsBranch = "trunk"
+def buildsRepo = "https://github.com/thelastpickle/cassandra-builds"
+def buildsBranch = "mck/19558"
 def dtestRepo = "https://github.com/apache/cassandra-dtest"
 def dtestBranch = "trunk"
 def buildDescStr = 'REF = ${GIT_BRANCH} <br /> COMMIT = ${GIT_COMMIT}'
