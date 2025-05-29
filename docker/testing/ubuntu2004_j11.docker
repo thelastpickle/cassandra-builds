@@ -11,7 +11,7 @@
 # limitations under the License.
 
 FROM ubuntu:20.04
-MAINTAINER Apache Cassandra <dev@cassandra.apache.org>
+LABEL org.opencontainers.image.authors="Apache Cassandra <dev@cassandra.apache.org>"
 
 # configure apt to retry downloads
 RUN echo 'APT::Acquire::Retries "99";' > /etc/apt/apt.conf.d/80-retries
@@ -84,6 +84,7 @@ RUN pip3 install --upgrade wheel
 # openjdk + ant
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update && \
+    apt-get install -y ca-certificates-java && \
     apt-get install -y --no-install-recommends openjdk-8-jdk openjdk-11-jdk openjdk-17-jdk ant ant-optional
 
 # make Java 8 the default executable (we use to run all tests against Java 8)
