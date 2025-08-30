@@ -10,6 +10,9 @@
 # This script is very basic and experimental. I beg of you to help improve it.
 #
 
+# Fail on any error
+set -euo pipefail
+
 ###################
 # prerequisites
 
@@ -23,9 +26,9 @@ command -v tar >/dev/null 2>&1 || { echo >&2 "tar needs to be installed"; exit 1
 command -v docker >/dev/null 2>&1 || { echo >&2 "docker needs to be installed"; exit 1; }
 (docker info >/dev/null 2>&1) || { echo >&2 "docker needs to running"; exit 1; }
 
+( [ $# -ge 2 ] ) || { echo >&2 "Usage $0 (staged|released) version [maven_staging_repo_id]"; exit 1; }
 ( [ "staged" = $1 ] || [ "released" = $1 ] ) || { echo >&2 "first argument must be staged or released"; exit 1; }
-( [ $# -ge 2 ] ) || { echo >&2 "minimum two arguments must be provided"; exit 1; }
-if [ -z "$3" ] ; then
+if [ -z "${3:-}" ] ; then
     [ "released" == $1 ] || { echo >&2 "third argument must not be specified when first is released"; exit 1; }
     dist_url="https://dist.apache.org/repos/dist/release/cassandra/$2/"
     maven_repo_url="https://repository.apache.org/content/repositories/releases/org/apache/cassandra/cassandra-all/$2"
@@ -43,23 +46,28 @@ fi
 
 ###################
 
-idx=`expr index "$2" -`
-if [ $idx -eq 0 ] ; then
-    release_short=${2}
-else
+release_short=${2}
+# Remove -prerelease label if the release version contains "-"
+if [ $(expr index "$2" "-") != 0 ]; then
+    idx=$(expr index "$2" "-")
     release_short=${2:0:$((idx-1))}
 fi
 packaging_series="$(echo ${release_short} | cut -d '.' -f 1)$(echo ${release_short} | cut -d '.' -f 2)x"
 
-mkdir -p /tmp/$2
-cd /tmp/$2
+# Use unique directory for idempotency
+BASEDIR=/tmp/$2
+mkdir -p ${BASEDIR}
+TMPDIR=`mktemp -d -p ${BASEDIR}`
+cd ${TMPDIR}
+
+echo "Using ${TMPDIR} as staging directory"
 echo "Downloading KEYS"
 wget -q https://downloads.apache.org/cassandra/KEYS
 echo "Downloading ${maven_repo_url}"
 wget -Nqnd -e robots=off --recursive --no-parent ${maven_repo_url}
 echo "Downloading ${dist_url}"
 wget -Nqe robots=off --recursive --no-parent ${dist_url}
-if [ -z "$3" ] ; then
+if [ -z "${3:-}" ] ; then
     mkdir dist.apache.org/repos/dist/release/cassandra/$2/{debian,redhat}
     echo "Downloading ${debian_url}/pool/main/c/cassandra/*${2/-/\~}*.deb"
     wget -Nqe robots=off --recursive --no-parent -A "*${2/-/\~}*.deb" -P dist.apache.org/repos/dist/release/cassandra/$2/debian ${debian_url}/pool/main/c/cassandra/
@@ -88,9 +96,9 @@ for f in *.asc ; do gpg --verify $f ; done
 for f in *.gz ; do echo -n "sha256: " ; echo "$(cat $f.sha256) $f" | sha256sum -c ; echo -n "sha512:" ; echo "$(cat $f.sha512) $f" | sha512sum -c ; done
 
 echo
-rm -fR apache-cassandra-$2-src
+echo "Extracting binary.."
 tar -xzf apache-cassandra-$2-src.tar.gz
-rm -fR apache-cassandra-$2
+echo "Extracting sources.."
 tar -xzf apache-cassandra-$2-bin.tar.gz
 
 JDKS="8"
@@ -99,18 +107,45 @@ if [[ $2 =~ [4]\. ]] ; then
 elif [[ $2 =~ [5]\. ]] ; then
     JDKS=("11" "17")
 fi
+echo "Testing JDKs: ${JDKS[@]}"
 TIMEOUT=2160
+
+# Create pipe used for check_output to verify expected output
+mkfifo procfifo
+
+has_failure=false
+function check_output
+{
+    PID=$1
+    shift 1
+    SECONDS=0
+    EXPECTED_OUTPUT="$@"
+    success=false
+    while read LINE ; do
+        if [[ $LINE =~ "${EXPECTED_OUTPUT}" ]] ; then
+            success=true
+            break
+        fi
+    done < procfifo
+    if $success ; then
+        echo "OK (Took ${SECONDS}s)"
+    else
+        has_failure=true
+        echo "FAILED (Took ${SECONDS}s)"
+    fi
+    if kill "$PID" && wait -f "$PID"; then
+        echo "WARN: killed process ${PID} exited with zero status when it shouldn't."
+    fi
+}
 
 for JDK in ${JDKS[@]} ; do
 
     # test source tarball build
-
     if [ "$JDK" == "11" ] ; then
         BUILD_OPT="-Duse.jdk11=true"
     fi
-    echo
-    rm -f procfifo
-    mkfifo procfifo
+
+    echo -ne "\nChecking source build (JDK ${JDK})... "
     docker run -i -v `pwd`/apache-cassandra-$2-src:/apache-cassandra-$2-src openjdk:${JDK}-jdk-slim-buster timeout ${TIMEOUT} /bin/bash -c "
         ( echo 'deb http://archive.debian.org/debian buster main' > /etc/apt/sources.list;
           echo 'deb http://archive.debian.org/debian-security buster/updates main' >> /etc/apt/sources.list;
@@ -120,49 +155,20 @@ for JDK in ${JDKS[@]} ; do
           tar -C /usr/local -xzf go1.24.5.linux-amd64.tar.gz; ) 2>&1 >/dev/null;
         export PATH=/usr/local/openjdk-11/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/go/bin:/usr/local/go/bin;
         cd apache-cassandra-$2-src;
-        ant artifacts ${BUILD_OPT}" 2>&1 >procfifo &
-
+        ant artifacts ${BUILD_OPT:-} " &> procfifo &
     PID=$!
-    success=false
-    while read LINE && ! $success ; do
-        if [[ $LINE =~ 'BUILD SUCCESSFUL' ]] ; then
-            echo "Source build (JDK ${JDK}) OK"
-            kill "$PID"
-            success=true
-        fi
-    done < procfifo
-    rm -f procfifo
-    wait "$PID"
-    if ! $success ; then
-        echo "Source build (JDK ${JDK}) FAILED"
-    fi
+    check_output $PID "BUILD SUCCESSFUL"
 
     # test binary tarball startup
-
-    echo
-    rm -f procfifo
-    mkfifo procfifo
+    echo -ne "\nChecking binary artefact (JDK ${JDK})... "
     docker run -i -v `pwd`/apache-cassandra-$2:/apache-cassandra-$2 openjdk:${JDK}-jdk-slim-buster timeout ${TIMEOUT} /bin/bash -c "
         ( echo 'deb http://archive.debian.org/debian buster main' > /etc/apt/sources.list;
           echo 'deb http://archive.debian.org/debian-security buster/updates main' >> /etc/apt/sources.list;
           apt -qq update;
           apt -qq install -y python python3 procps ) 2>&1 >/dev/null;
-        HEAP_NEWSIZE=500m MAX_HEAP_SIZE=1g MAX_DIRECT_MEMORY_SIZE=1g apache-cassandra-$2/bin/cassandra -R -f" 2>&1 >procfifo &
-
+        HEAP_NEWSIZE=500m MAX_HEAP_SIZE=1g MAX_DIRECT_MEMORY_SIZE=1g apache-cassandra-$2/bin/cassandra -R -f -Dcassandra.ring_delay_ms=1000" &> procfifo &
     PID=$!
-    success=false
-    while read LINE && ! $success ; do
-        if [[ $LINE =~ "Starting listening for CQL clients on" ]] ; then
-            echo "Binary artefact (JDK ${JDK}) OK"
-            kill "$PID"
-            success=true
-        fi
-    done < procfifo
-    rm -f procfifo
-    wait "$PID"
-    if ! $success ; then
-        echo "Binary artefact (JDK ${JDK}) FAILED"
-    fi
+    check_output $PID "Starting listening for CQL clients on"
 
     # test deb package startup
     if [ "$JDK" == "8" ] ; then
@@ -171,10 +177,8 @@ for JDK in ${JDKS[@]} ; do
         DEBIAN_IMAGE="debian:bullseye-slim"
     fi
 
+    echo -ne "\nChecking Debian package (JDK ${JDK})... "
     if [ "$JDK" == "8" ] ; then
-      echo
-      rm -f procfifo
-      mkfifo procfifo
       docker run -i -v `pwd`/debian:/debian ${DEBIAN_IMAGE} timeout ${TIMEOUT} /bin/bash -c "
           ( echo 'deb http://archive.debian.org/debian buster main' > /etc/apt/sources.list;
             echo 'deb http://archive.debian.org/debian-security buster/updates main' >> /etc/apt/sources.list;
@@ -183,41 +187,22 @@ for JDK in ${JDKS[@]} ; do
             apt -qq install -y python3 procps ;
             apt -qq install -y openjdk-${JDK}-jre-headless ; # will silently fail on *jdk-slim-buster
             dpkg --ignore-depends=java7-runtime --ignore-depends=java8-runtime -i debian/*.deb ) 2>&1 >/dev/null ;
-          HEAP_NEWSIZE=500m MAX_HEAP_SIZE=1g MAX_DIRECT_MEMORY_SIZE=1g cassandra -R -f" 2>&1 >procfifo &
+          HEAP_NEWSIZE=500m MAX_HEAP_SIZE=1g MAX_DIRECT_MEMORY_SIZE=1g cassandra -R -f -Dcassandra.ring_delay_ms=1000" &> procfifo &
     else
-      echo
-      rm -f procfifo
-      mkfifo procfifo
       docker run -i -v `pwd`/debian:/debian ${DEBIAN_IMAGE} timeout ${TIMEOUT} /bin/bash -c "
           ( apt -qq update ;
             apt -qq install -y python ; # will silently fail on debian latest
             apt -qq install -y python3 procps ;
             apt -qq install -y openjdk-${JDK}-jre-headless ; # will silently fail on *jdk-slim-buster
             dpkg --ignore-depends=java7-runtime --ignore-depends=java8-runtime -i debian/*.deb ) 2>&1 >/dev/null ;
-          HEAP_NEWSIZE=500m MAX_HEAP_SIZE=1g MAX_DIRECT_MEMORY_SIZE=1g cassandra -R -f" 2>&1 >procfifo &
+          HEAP_NEWSIZE=500m MAX_HEAP_SIZE=1g MAX_DIRECT_MEMORY_SIZE=1g cassandra -R -f -Dcassandra.ring_delay_ms=1000" &> procfifo &
     fi
-
     PID=$!
-    success=false
-    while read LINE && ! $success ; do
-        if [[ $LINE =~ "Starting listening for CQL clients on" ]] ; then
-            echo "Debian package (JDK ${JDK}) OK"
-            kill "$PID"
-            success=true
-        fi
-    done < procfifo
-    rm -f procfifo
-    wait "$PID"
-    if ! $success ; then
-        echo "Debian package (JDK ${JDK}) FAILED"
-    fi
+    check_output $PID "Starting listening for CQL clients on"
 
     # test deb repository startup
-
+    echo -ne "\nChecking Debian repository (JDK ${JDK})... "
     if [ "$JDK" == "8" ] ; then
-      echo
-      rm -f procfifo
-      mkfifo procfifo
       docker run -i ${DEBIAN_IMAGE} timeout ${TIMEOUT} /bin/bash -c "
           ( echo 'deb http://archive.debian.org/debian-security buster/updates main' >> /etc/apt/sources.list;
             echo 'deb http://archive.debian.org/debian buster main' > /etc/apt/sources.list;
@@ -229,11 +214,8 @@ for JDK in ${JDKS[@]} ; do
             echo 'deb ${debian_url} ${packaging_series} main' | tee -a /etc/apt/sources.list.d/cassandra.sources.list ;
             apt update  ;
             apt-get install -y cassandra ) 2>&1 >/dev/null ;
-          HEAP_NEWSIZE=500m MAX_HEAP_SIZE=1g MAX_DIRECT_MEMORY_SIZE=1g cassandra -R -f" 2>&1 >procfifo &
+          HEAP_NEWSIZE=500m MAX_HEAP_SIZE=1g MAX_DIRECT_MEMORY_SIZE=1g cassandra -R -f -Dcassandra.ring_delay_ms=1000" &> procfifo &
     else
-      echo
-      rm -f procfifo
-      mkfifo procfifo
       docker run -i ${DEBIAN_IMAGE} timeout ${TIMEOUT} /bin/bash -c "
           ( apt -qq update ;
             apt -qq install -y curl gnupg2 ;
@@ -243,24 +225,12 @@ for JDK in ${JDKS[@]} ; do
             echo 'deb ${debian_url} ${packaging_series} main' | tee -a /etc/apt/sources.list.d/cassandra.sources.list ;
             apt update  ;
             apt-get install -y cassandra ) 2>&1 >/dev/null ;
-          HEAP_NEWSIZE=500m MAX_HEAP_SIZE=1g MAX_DIRECT_MEMORY_SIZE=1g cassandra -R -f" 2>&1 >procfifo &
+          HEAP_NEWSIZE=500m MAX_HEAP_SIZE=1g MAX_DIRECT_MEMORY_SIZE=1g cassandra -R -f -Dcassandra.ring_delay_ms=1000" &> procfifo &
     fi
-
     PID=$!
-    success=false
-    while read LINE && ! $success ; do
-        if [[ $LINE =~ "Starting listening for CQL clients on" ]] ; then
-            echo "Debian repository (JDK ${JDK}) OK"
-            kill "$PID"
-            success=true
-        fi
-    done < procfifo
-    rm -f procfifo
-    wait "$PID"
-    if ! $success ; then
-        echo "Debian repository (JDK ${JDK}) FAILED"
-    fi
+    check_output $PID "Starting listening for CQL clients on"
 
+    # test red hat startup for different dists
     if [ "$JDK" == "8" ] ; then
         JDK_RH="java-1.8.0-openjdk"
     else
@@ -271,48 +241,31 @@ for JDK in ${JDKS[@]} ; do
     if ! [[ $2 =~ [23]\. ]] ; then
         RH_DISTS=("almalinux" "noboolean")
     fi
+
     for RH_DIST in ${RH_DISTS[@]} ; do
 
         NOBOOLEAN_REPO=""
         if [ "$RH_DIST" == "noboolean" ] ; then
             NOBOOLEAN_REPO="/noboolean"
         fi
+
         REPO_VERSION=""
         if [ "released" == "$1" ] ; then
             REPO_VERSION="${packaging_series}"
         fi
 
         # test rpm package startup
-
-        echo
-        rm -f procfifo
-        mkfifo procfifo
+        echo -ne "\nChecking Redhat package (${RH_DIST} JDK ${JDK})... "
         docker run -i -v `pwd`/redhat${NOBOOLEAN_REPO}:/redhat almalinux timeout ${TIMEOUT} /bin/bash -c "
             ( yum install -y  procps-ng python3-pip;
             yum install -y ${JDK_RH} ;
             rpm -i --nodeps redhat/*.rpm ) 2>&1 >/dev/null ;
-            HEAP_NEWSIZE=500m MAX_HEAP_SIZE=1g MAX_DIRECT_MEMORY_SIZE=1g cassandra -R -f " 2>&1  >procfifo &
-
+            HEAP_NEWSIZE=500m MAX_HEAP_SIZE=1g MAX_DIRECT_MEMORY_SIZE=1g cassandra -R -f -Dcassandra.ring_delay_ms=1000" &> procfifo &
         PID=$!
-        success=false
-        while read LINE && ! $success ; do
-            if [[ $LINE =~ "Starting listening for CQL clients on" ]] ; then
-                echo "Redhat package (${RH_DIST} JDK ${JDK}) OK"
-                kill "$PID"
-                success=true
-            fi
-        done < procfifo
-        rm -f procfifo
-        wait "$PID"
-        if ! $success ; then
-            echo "Redhat package (${RH_DIST} JDK ${JDK}) FAILED"
-        fi
+        check_output $PID "Starting listening for CQL clients on"
 
         # test redhat repository startup
-
-        echo
-        rm -f procfifo
-        mkfifo procfifo
+        echo -ne "\nChecking Redhat repository (${RH_DIST} JDK ${JDK})... "
         # yum repo installation failing due to a legacy (SHA1) third-party sig in our KEYS file, hence use of update-crypto-policies. Impacts all rhel9+ users.
         docker run -i  almalinux timeout ${TIMEOUT} /bin/bash -c "(
             echo '[cassandra]' >> /etc/yum.repos.d/cassandra.repo ;
@@ -327,23 +280,14 @@ for JDK in ${JDKS[@]} ; do
             yum install -y ${JDK_RH} ;
             yum install -y cassandra ) 2>&1 >/dev/null ;
 
-            HEAP_NEWSIZE=500m MAX_HEAP_SIZE=1g MAX_DIRECT_MEMORY_SIZE=1g cassandra -R -f" 2>&1 >procfifo &
-
+            HEAP_NEWSIZE=500m MAX_HEAP_SIZE=1g MAX_DIRECT_MEMORY_SIZE=1g cassandra -R -f -Dcassandra.ring_delay_ms=1000" &> procfifo &
         PID=$!
-        success=false
-        while read LINE && ! $success ; do
-            if [[ $LINE =~ "Starting listening for CQL clients on" ]] ; then
-                echo "Redhat repository (${RH_DIST} JDK ${JDK}) OK"
-                kill "$PID"
-                success=true
-            fi
-        done < procfifo
-        rm -f procfifo
-        wait "$PID"
-        if ! $success ; then
-            echo "Redhat repository (${RH_DIST} JDK ${JDK}) FAILED"
-        fi
+        check_output $PID "Starting listening for CQL clients on"
     done
 done
 
+rm -f procfifo
+cd -
 echo "Done."
+
+`$has_failure` && { echo >&2 "Validation check failed"; exit 1; }
