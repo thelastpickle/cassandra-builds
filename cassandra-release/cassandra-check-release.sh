@@ -32,8 +32,8 @@ if [ -z "${3:-}" ] ; then
     [ "released" == $1 ] || { echo >&2 "third argument must not be specified when first is released"; exit 1; }
     dist_url="https://dist.apache.org/repos/dist/release/cassandra/$2/"
     maven_repo_url="https://repository.apache.org/content/repositories/releases/org/apache/cassandra/cassandra-all/$2"
-    debian_url="https://debian.cassandra.apache.org/"
-    redhat_url="https://redhat.cassandra.apache.org/"
+    debian_url="https://apache.jfrog.io/artifactory/cassandra-deb/"
+    redhat_url="https://apache.jfrog.io/artifactory/cassandra-rpm/"
 else
     [ "staged" == $1 ] || { echo >&2 "third argument must be specified when first is staged"; exit 1; }
     dist_url="https://dist.apache.org/repos/dist/dev/cassandra/$2/"
@@ -69,10 +69,14 @@ echo "Downloading ${dist_url}"
 wget -Nqe robots=off --recursive --no-parent ${dist_url}
 if [ -z "${3:-}" ] ; then
     mkdir dist.apache.org/repos/dist/release/cassandra/$2/{debian,redhat}
-    echo "Downloading ${debian_url}/pool/main/c/cassandra/*${2/-/\~}*.deb"
-    wget -Nqe robots=off --recursive --no-parent -A "*${2/-/\~}*.deb" -P dist.apache.org/repos/dist/release/cassandra/$2/debian ${debian_url}/pool/main/c/cassandra/
-    echo "Downloading ${redhat_url}/${packaging_series}/**/*${2/-/\~}*.rpm"
-    wget -Nqe robots=off --recursive --no-parent -A "*${2/-/\~}*.rpm" -P dist.apache.org/repos/dist/release/cassandra/$2/redhat ${redhat_url}/${packaging_series}/
+    deb_url="${debian_url}/pool/main/c/cassandra/"
+    echo "Downloading ${deb_url}/*${release_short}*.deb"
+    # folder structure to be trimmed by -nH --cut-dirs opt: apache.jfrog.io/artifactory/cassandra-deb//pool/main/c/cassandra
+    wget -Nqe robots=off -nH --cut-dirs=7 --recursive --no-parent -A "*${release_short}*.deb" -P dist.apache.org/repos/dist/release/cassandra/$2/debian ${deb_url}
+    rpm_url="${redhat_url}/${packaging_series}/"
+    echo "Downloading ${rpm_url}/*${release_short}*.rpm"
+    # folder structure to be trimmed by -nH --cut-dirs opt: apache.jfrog.io/artifactory/cassandra-rpm//41x/
+    wget -Nqe robots=off -nH --cut-dirs=4 --recursive --no-parent -A "*${release_short}*.rpm" -P dist.apache.org/repos/dist/release/cassandra/$2/redhat ${rpm_url}
 fi
 
 echo
