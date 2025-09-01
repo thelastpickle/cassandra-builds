@@ -137,9 +137,8 @@ function check_output
         has_failure=true
         echo "FAILED (Took ${SECONDS}s)"
     fi
-    if kill "$PID" && wait -f "$PID"; then
-        echo "WARN: killed process ${PID} exited with zero status when it shouldn't."
-    fi
+    # kill and wait process exit, ignore exit status
+    kill "$PID" && wait -f "$PID" || true
 }
 
 for JDK in ${JDKS[@]} ; do
@@ -291,7 +290,6 @@ for JDK in ${JDKS[@]} ; do
 done
 
 rm -f procfifo
-cd -
 echo "Done."
 
 `$has_failure` && { echo >&2 "Validation check failed"; exit 1; }
